@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build DMG
+        run: ./scripts/build_dmg.sh
+
+      - name: Verify DMG artifact
+        run: |
+          ls -lh build
+          test -f build/MultiLLMApp.dmg
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MultiLLMApp-dmg
+          path: build/MultiLLMApp.dmg
+          if-no-files-found: error
+
+      - name: Create Release
+        id: create_release
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const tag = context.ref.replace('refs/tags/', '');
+            let release;
+
+            try {
+              const existing = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag,
+              });
+              release = existing.data;
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+            }
+
+            if (!release) {
+              const created = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: tag,
+                name: tag,
+                draft: false,
+                prerelease: false,
+              });
+              release = created.data;
+            }
+
+            core.setOutput('upload_url', release.upload_url);
+
+      - name: Upload DMG asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: build/MultiLLMApp.dmg
+          asset_name: MultiLLMApp.dmg
+          asset_content_type: application/x-apple-diskimage
